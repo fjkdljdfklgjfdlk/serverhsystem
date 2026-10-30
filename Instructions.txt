@@ -1,0 +1,32 @@
+ServerHSystem untuk Windows 64-bit - paket folder 1.1.0
+
+1. Ekstrak SELURUH isi file ZIP ke folder yang dapat ditulisi (writable).
+2. Pastikan ServerHSystem.exe, runtime, windows_start.pyw, panel.py, dan announcer.py tetap berada dalam satu folder.
+3. Salin .env.example menjadi .env, lalu masukkan cookie terbaru Anda ke dalamnya.
+4. Jalankan ServerHSystem.exe. Gunakan tombol bahasa Inggris / Bahasa Indonesia yang tersedia pada panel.
+
+Jika Anda sudah memiliki file .env atau delivery-history.json, simpan file-file tersebut saat melakukan pembaruan.
+Peluncur (launcher) ini memerlukan folder runtime; menyalin file EXE saja tidak akan berhasil.
+Python tidak perlu diinstal secara terpisah. File DMG untuk Mac tidak mengalami perubahan.
+
+Perubahan pengemasan
+File EXE yang sebelumnya menggunakan sistem ekstraksi mandiri (self-extracting) khusus kini telah diganti dengan peluncur Windows standar. Peluncur ini menjalankan runtime Python resmi yang tidak dimodifikasi di dalam folder runtime/.
+Kode sumber aplikasi dapat dilihat di samping file peluncur. Kode sumber peluncur, manifes, sumber daya versi, dan perintah pembangunan (build commands) tersedia di dalam folder launcher-source/.
+Paket ini tidak menyertakan muatan ekstraksi mandiri, pengemas (packer), teknik pengaburan kode (obfuscation), pengunduh, peningkatan hak akses (elevation), instalasi otomatis, pendaftaran untuk berjalan saat sistem dimulai (startup registration), maupun perubahan pengaturan antivirus.
+
+Status Windows Defender
+Paket ini belum dipindai dengan Windows Defender atau dijalankan pada sistem Windows oleh kami.
+Perubahan metode pengemasan TIDAK berarti bahwa deteksi sebelumnya adalah kesalahan (false positive), dan tidak menjamin bahwa peringatan baru akan hilang. Peluncur kustom ini tidak memiliki tanda tangan digital (unsigned).
+Tidak tersedia sertifikat penandatanganan kode (code-signing certificate) yang tepercaya. Peringatan reputasi dari SmartScreen dan deteksi malware oleh Defender adalah dua hal yang berbeda.
+
+Jika Windows Security mendeteksi ancaman, catat nama deteksi tersebut dan gunakan proses peninjauan file resmi dari Microsoft untuk pengembang perangkat lunak:
+https://www.microsoft.com/en-us/wdsi/filesubmission/
+https://learn.microsoft.com/en-us/defender-xdr/developer-faq
+Kirimkan hanya file program yang ditandai sebagai ancaman. Jangan mengirimkan file .env atau cookie Anda.
+Tidak disediakan pengecualian (exclusions), daftar izin (allowlisting), atau skrip untuk menonaktifkan perlindungan Defender.
+
+Verifikasi
+Lihat file package-manifest.json untuk mengetahui nilai hash dan detail pembangunan (build). Scan-With-Defender.ps1
+dapat menjalankan pemindaian kustom Defender standar pada folder ini di Windows. Skrip ini tidak akan pernah menonaktifkan perlindungan atau membuat pengecualian. Windows mungkin memerlukan PowerShell dengan hak akses administrator untuk melakukan pemindaian tersebut. Jangan melonggarkan kebijakan eksekusi skrip (script execution policy) demi menjalankannya.
+
+Fitur pengumuman masih menggunakan API obrolan (Chat API) situs web yang bersifat eksperimental. Pengiriman pesan ke setiap teman belum terverifikasi. Keberhasilan dalam membangun paket (package build) bukan berarti pengujian pengiriman telah dilakukan.
