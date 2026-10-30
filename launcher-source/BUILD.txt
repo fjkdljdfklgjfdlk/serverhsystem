@@ -1,0 +1,19 @@
+ServerHSystem native Windows launcher 1.1.0
+
+Build with the LLVM toolchain (Clang, lld-link, llvm-rc) and Python:
+
+python build_native.py --output ServerHSystem.exe
+
+build_native.py runs the normal Clang compiler, LLVM resource compiler and LLD
+linker. The PE contains compiled C code, import tables, version information and
+an asInvoker manifest. It uses only documented Win32 APIs, with ASLR, high-entropy
+ASLR and DEP enabled. Win32 ABI structure sizes are checked at compile time.
+
+The launcher starts runtime/pythonw.exe with windows_start.pyw. It performs no
+downloads, archive extraction, elevation, antivirus changes or installation.
+All Python source and runtime files are ordinary files beside the launcher.
+
+The custom launcher is unsigned. It is not certified clean by Microsoft. Its
+packaging does not guarantee acceptance by Defender or SmartScreen. If flagged,
+use Microsoft's official file-submission process for analysis and include the
+exact detection name. No security exclusions or bypass scripts are included.
