@@ -1,6 +1,6 @@
 # Adapted from EFF Large Wordlist by Joseph Bonneau / Electronic Frontier Foundation.
 # Source: https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt
-# License: Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/).
+# License: Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/).
 # Modified: alphabetic words of 3-8 letters; sensitive terms filtered.
 abacus
 abide
