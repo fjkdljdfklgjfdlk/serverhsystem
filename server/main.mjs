@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AppError, ensure, userId, roleState, availableActions, validateAction, banPayload } from './policy.mjs';
 import { Roblox } from './roblox.mjs';
 import { createPhrase } from './challenges.mjs';
+import { community } from './community.mjs';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const GROUP = '988023438', UNIVERSE = '7933292768';
 const hash = s => createHash('sha256').update(s).digest('hex');
@@ -50,19 +51,21 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
     ensure(session, 401, 'Your session ended. Connect your account again.');
     const rank = await state(session.user_id);
     if (!rank.access) { sql('DELETE FROM sessions WHERE hash=?', key); throw new AppError(403, 'Lead Operator or higher is required. Your access has been removed.'); }
-    return { ...rank, id: session.user_id, name: session.name, expires: session.expires, key };
+    const actor = { ...rank, id: session.user_id, name: session.name, expires: session.expires, key };
+    people.remember(actor); return actor;
   }
-  const publicActor = a => ({ id: a.id, name: a.name, role: a.label, expires: a.expires });
+  const people = community({ db, rb, state, rate, groupId: GROUP });
+  const publicActor = async a => { const d = (await people.decorate([a]))[0]; return { id:a.id, name:a.name, role:a.label, expires:a.expires, avatarUrl:d.avatarUrl, frame:d.frame, rankFrame:d.rankFrame, badges:d.badges }; };
   let directoryCache = null, directoryPending = null;
   async function directory(refresh) {
     const age = directoryCache ? Date.now() - directoryCache.fetchedAt : Infinity;
     if (directoryCache && age < (refresh ? 5000 : 30000)) return directoryCache;
     if (!directoryPending) directoryPending = (async () => {
       const records = (await rb.directory()).map(row => {
-        let role;
-        try { role = roleState(row.membership, policy, GROUP).label; }
+        let role, roles = [];
+        try { const rank = roleState(row.membership, policy, GROUP); role = rank.label; roles = rank.roles; }
         catch (error) { if (error.status !== 403) throw error; role = 'Role needs owner review'; }
-        return { id: row.id, name: row.name, displayName: row.displayName, role };
+        return { id: row.id, name: row.name, displayName: row.displayName, role, roles };
       }).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
       directoryCache = { records, fetchedAt: Date.now() }; return directoryCache;
     })().finally(() => { directoryPending = null; });
@@ -108,13 +111,14 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
       if (!path.startsWith('/api/')) {
         const files = { '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'], '/styles.css': ['styles.css', 'text/css'], '/app.js': ['app.js', 'text/javascript'], '/session.mjs': ['session.mjs', 'text/javascript'], '/config.js': ['config.js', 'text/javascript'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'], '/serverh-logo.png': ['serverh-logo.png', 'image/png'] };
         const file = Object.hasOwn(files, path) ? files[path] : null; ensure(file && req.method === 'GET', 404, 'Not found.');
-        res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
+        res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.rbxcdn.com; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
         res.writeHead(200, { 'Content-Type': file[1].startsWith('image/') ? file[1] : `${file[1]}; charset=utf-8` }); res.end(readFileSync(resolve(ROOT, 'web', file[0]))); return;
       }
       ensure(!reqOrigin || allowedOrigins.has(reqOrigin), 403, 'This website origin is not allowed.');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       const address = env.TRUST_PROXY === '1' ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',').at(-1).trim() : req.socket.remoteAddress;
       rate(`ip:${hash(address || 'unknown')}`, 150, 60);
+      if (path === '/api/branding' && req.method === 'GET') return json(200, { group: await people.branding() });
       if (path === '/api/health' && req.method === 'GET') return json(200, { status: 'running', configured: Boolean(env.ROBLOX_API_KEY && botId), groupId: GROUP, universeId: UNIVERSE });
       if (path === '/api/auth/challenge' && req.method === 'POST') {
         rate(`login:${hash(address || 'unknown')}`, 12, 900);
@@ -125,7 +129,7 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
         const phrase = createPhrase();
         const expires = Date.now() + 600000;
         sql('INSERT INTO challenges(hash,user_id,name,phrase,expires) VALUES(?,?,?,?,?)', hash(secret), String(profile.id), profile.name, phrase, expires);
-        return json(200, { challengeToken: secret, phrase, expires, user: { id: String(profile.id), name: profile.name, displayName: profile.displayName } });
+        return json(200, { challengeToken: secret, phrase, expires, user: { id: String(profile.id), name: profile.name, displayName: profile.displayName, avatarUrl: (await people.decorate([{ id: String(profile.id), roles: [] }]))[0].avatarUrl } });
       }
       if (path === '/api/auth/verify' && req.method === 'POST') {
         const input = await body(req);
@@ -140,11 +144,14 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
         ensure(consumed.changes === 1, 401, 'That verification has expired or was already used.');
         const secret = token(), expires = Date.now() + 3600000;
         sql('INSERT INTO sessions VALUES(?,?,?,?)', hash(secret), c.user_id, profile.name, expires);
-        return json(200, { token: secret, user: publicActor({ ...rank, id: c.user_id, name: profile.name, expires }) });
+        const connected = { ...rank, id: c.user_id, name: profile.name, expires }; people.remember(connected);
+        return json(200, { token: secret, user: await publicActor(connected) });
       }
       const actor = await auth(req);
+      const communityResult = await people.route(path, req, actor, body);
+      if (communityResult) return json(200, communityResult);
       if (path === '/api/auth/logout' && req.method === 'POST') { sql('DELETE FROM sessions WHERE hash=?', actor.key); return json(200, { ok: true }); }
-      if (path === '/api/me' && req.method === 'GET') return json(200, { user: publicActor(actor), roles: Object.entries(policy).filter(([,r]) => r.assignable && !r.access && r.priority < actor.priority).map(([id,r]) => ({ id, name: r.name })).sort((a,b) => policy[a.id].priority - policy[b.id].priority), capabilities: { groupActions: Boolean(env.ROBLOX_COOKIE), experienceBans: Boolean(env.ROBLOX_API_KEY) } });
+      if (path === '/api/me' && req.method === 'GET') return json(200, { user: await publicActor(actor), group: await people.branding(), roles: Object.entries(policy).filter(([,r]) => r.assignable && !r.access && r.priority < actor.priority).map(([id,r]) => ({ id, name: r.name })).sort((a,b) => policy[a.id].priority - policy[b.id].priority), capabilities: { groupActions: Boolean(env.ROBLOX_COOKIE), experienceBans: Boolean(env.ROBLOX_API_KEY) } });
       if (path === '/api/members' && req.method === 'GET') {
         rate(`directory:${actor.id}`, 30, 60);
         const query = new URL(req.url, 'http://localhost').searchParams;
@@ -153,7 +160,7 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
         const result = await directory(query.get('refresh') === '1'), needle = search.normalize('NFKC').toLowerCase();
         const matches = result.records.filter(row => !needle || [row.name, row.displayName, row.id, row.role].some(value => value.normalize('NFKC').toLowerCase().includes(needle)));
         const pageSize = 20, totalPages = Math.max(1, Math.ceil(matches.length / pageSize)), page = Math.min(Number(pageValue), totalPages);
-        return json(200, { members: matches.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matches.length, totalMembers: result.records.length, totalPages, fetchedAt: result.fetchedAt });
+        return json(200, { members: await people.decorate(matches.slice((page - 1) * pageSize, page * pageSize)), page, pageSize, total: matches.length, totalMembers: result.records.length, totalPages, fetchedAt: result.fetchedAt });
       }
       if (['/api/users/lookup', '/api/member'].includes(path) && req.method === 'POST') {
         rate(`lookup:${actor.id}`, 30, 60);
@@ -164,8 +171,8 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
           ensure(/^[A-Za-z0-9_]{3,20}$/.test(query), 400, 'Enter a Roblox username or numeric user ID, not a display name.');
           id = userId((await rb.resolve(query, { excludeBannedUsers: false })).id);
         }
-        const v = await target(id, { lookupOnly: true }), actions = availableActions(actor, v, botId);
-        return json(200, { user: { id: v.id, name: v.name, displayName: v.displayName, role: v.label, roles: v.roles.map(r => ({ id:r.id, name:r.name })), isMember: v.isMember, policyConfirmed: v.policyConfirmed, manageable: actions.length > 0, allowedActions: actions } });
+        const v = await target(id, { lookupOnly: true }), actions = availableActions(actor, v, botId), decorated = (await people.decorate([v]))[0];
+        return json(200, { user: { avatarUrl: decorated.avatarUrl, frame: decorated.frame, rankFrame: decorated.rankFrame, badges: decorated.badges, id: v.id, name: v.name, displayName: v.displayName, role: v.label, roles: v.roles.map(r => ({ id:r.id, name:r.name })), isMember: v.isMember, policyConfirmed: v.policyConfirmed, manageable: actions.length > 0, allowedActions: actions } });
       }
       if (path === '/api/audit' && req.method === 'GET') {
         const rows = db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 100').all();

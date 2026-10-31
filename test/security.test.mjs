@@ -186,7 +186,7 @@ test('member directory is staff-only, searches the whole group, paginates, and p
  assert.equal((await f.request('/members')).status,401);assert.equal((await f.request('/members',undefined,'x'.repeat(43))).status,401);assert.equal(loads,0);
  const {token}=await f.login();const first=await f.request('/members',undefined,token);
  assert.equal(first.status,200);assert.equal(first.body.totalMembers,45);assert.equal(first.body.totalPages,3);assert.equal(first.body.members.length,20);assert.equal(first.body.members[0].id,'100');
- assert.deepEqual(Object.keys(first.body.members[0]).sort(),['displayName','id','name','role']);
+ assert.deepEqual(Object.keys(first.body.members[0]).sort(),['avatarUrl','badges','displayName','frame','id','name','rankFrame','role','roles']);
  const second=await f.request('/members?page=2',undefined,token);assert.equal(second.body.members[0].id,'120');assert.equal(loads,1);
  const match=await f.request('/members?search=display%20131',undefined,token);assert.equal(match.body.total,1);assert.equal(match.body.members[0].id,'131');
  const unknown=await f.request('/members?search=owner%20review',undefined,token);assert.equal(unknown.body.members[0].id,'144');
@@ -235,4 +235,54 @@ test('Roblox directory rejects foreign members, pagination loops, and mismatched
   }});
   await assert.rejects(rb.directory(),error=>error.status===502);assert.ok(count<=2);
  }
+});
+
+test('staff chat requires verified sign-in, isolates conversations, and cannot forge a sender',async t=>{
+ const f=await fixture(t);f.rb.resolve=async name=>({id:{FirstStaff:10,SecondStaff:40,ThirdStaff:30,LowUser:20}[name],name});
+ const a=await f.login('FirstStaff'),b=await f.login('SecondStaff'),c=await f.login('ThirdStaff');
+ assert.equal((await f.request('/chat/contacts')).status,401);
+ const contacts=await f.request('/chat/contacts',undefined,a.token);assert.deepEqual(contacts.body.contacts.map(p=>p.id).sort(),['30','40']);
+ assert.equal((await f.request('/chat/messages',{peerId:'20',content:'Hello',nonce:'nonce-00000000001'},a.token)).status,404);
+ const content='<script>alert("x")</script> & literal text';
+ const sent=await f.request('/chat/messages',{peerId:'40',content,nonce:'nonce-00000000002',sender:'30'},a.token);assert.equal(sent.status,200);assert.equal(sent.body.message.sender,'10');assert.equal(sent.body.message.content,content);
+ assert.equal((await f.request('/chat/messages?peer=10',undefined,b.token)).body.messages[0].content,content);
+ assert.equal((await f.request('/chat/messages?peer=40&sender=10',undefined,c.token)).body.messages.length,0);
+ assert.equal((await f.request('/chat/messages?peer=10',undefined,c.token)).body.messages.length,0);
+ assert.equal((await f.request('/chat/messages?peer=10',undefined,a.token)).status,400);
+ assert.equal(f.calls.length,0);
+});
+test('chat retries are idempotent, nonce conflicts rejected, and history paginates privately',async t=>{
+ const f=await fixture(t);f.rb.resolve=async name=>({id:name==='SecondStaff'?40:10,name});const a=await f.login(),b=await f.login('SecondStaff');
+ const input={peerId:'40',content:'First message',nonce:'unique-message-0001'};
+ const [x,y]=await Promise.all([f.request('/chat/messages',input,a.token),f.request('/chat/messages',input,a.token)]);assert.equal(x.status,200);assert.equal(y.status,200);assert.equal(x.body.message.id,y.body.message.id);
+ assert.equal((await f.request('/chat/messages',{...input,content:'Different message'},a.token)).status,409);
+ for(let n=0;n<55;n++)f.db.prepare('INSERT INTO messages(sender,recipient,content,at,nonce) VALUES(?,?,?,?,?)').run('10','40','History '+n,Date.now(),'history-'+n);
+ const latest=await f.request('/chat/messages?peer=10',undefined,b.token);assert.equal(latest.body.messages.length,50);assert.equal(latest.body.hasMore,true);
+ const older=await f.request('/chat/messages?peer=10&before='+latest.body.messages[0].id,undefined,b.token);assert.equal(older.body.messages.length,6);assert.equal(older.body.hasMore,false);
+ assert.equal((await f.request('/chat/messages?peer=10&before=-1',undefined,b.token)).status,400);
+});
+test('revoked staff cannot send or read chat, and recipients are checked again before insert',async t=>{
+ const f=await fixture(t);f.rb.resolve=async name=>({id:name==='SecondStaff'?40:10,name});const a=await f.login(),b=await f.login('SecondStaff');
+ f.ranks.set('40',[MEMBER]);assert.equal((await f.request('/chat/contacts',undefined,a.token)).body.contacts.length,0);
+ assert.equal((await f.request('/chat/messages?peer=40',undefined,a.token)).status,403);
+ assert.equal((await f.request('/chat/messages',{peerId:'40',content:'Hello',nonce:'nonce-00000000001'},a.token)).status,403);
+ assert.equal((await f.request('/chat/messages?peer=10',undefined,b.token)).status,403);
+ f.ranks.set('40',[LEAD]);const old=f.rb.membership;let checks=0;f.rb.membership=async id=>{if(id==='40'&&++checks===2)f.ranks.set('40',[MEMBER]);return old(id);};
+ assert.equal((await f.request('/chat/messages',{peerId:'40',content:'Hello',nonce:'nonce-00000000002'},a.token)).status,403);
+ assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM messages').get().n,0);
+});
+test('chat validates message content, limits sends, and refuses expired sessions at commit',async t=>{
+ const f=await fixture(t);f.rb.resolve=async name=>({id:name==='SecondStaff'?40:10,name});const a=await f.login();await f.login('SecondStaff');
+ for(const [i,content]of['','   ','x'.repeat(2001),'bad\u0000text'].entries())assert.equal((await f.request('/chat/messages',{peerId:'40',content,nonce:'invalid-message-'+i},a.token)).status,400);
+ assert.equal((await f.request('/chat/messages',{peerId:'40',content:'Hello',nonce:'bad'},a.token)).status,400);
+ for(let i=0;i<10;i++)assert.equal((await f.request('/chat/messages',{peerId:'40',content:'Hello',nonce:'valid-message-000'+i},a.token)).status,200);
+ assert.equal((await f.request('/chat/messages',{peerId:'40',content:'Too many',nonce:'valid-message-99999'},a.token)).status,429);
+ f.db.exec("DELETE FROM limits WHERE key LIKE 'chat-send:%'");const old=f.rb.membership;let n=0;f.rb.membership=async id=>{if(id==='40'&&++n===2)f.db.exec('UPDATE sessions SET expires=0');return old(id);};
+ assert.equal((await f.request('/chat/messages',{peerId:'40',content:'Expired',nonce:'valid-message-expired'},a.token)).status,401);
+});
+test('profile frames are cosmetic, belong to the signed-in user, and do not expose session hashes',async t=>{
+ const f=await fixture(t),a=await f.login();let r=await f.request('/profile/frame',{frame:'rainbow',userId:'40',role:'E'},a.token);assert.equal(r.status,200);assert.equal(r.body.user.frame,'rainbow');assert.equal(r.body.user.role,'Lead Operator');assert.equal(r.body.user.key,undefined);
+ assert.equal((await f.request('/me',undefined,a.token)).body.user.frame,'rainbow');assert.equal(f.db.prepare('SELECT * FROM panel_people WHERE user_id=?').get('40'),undefined);
+ assert.equal((await f.request('/profile/frame',{frame:'gold'},a.token)).status,400);assert.equal((await f.request('/profile/frame',{frame:'steel'})).status,401);
+ f.ranks.set('10',[MEMBER]);assert.equal((await f.request('/profile/frame',{frame:'steel'},a.token)).status,403);
 });

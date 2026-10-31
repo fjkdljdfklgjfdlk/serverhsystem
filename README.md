@@ -103,6 +103,18 @@ Each mutation requires a server-issued review tied to the session and current ta
 
 The audit log records operator, target, reason, internal details, time, and result. The UI shows the latest 100 panel operations and can export CSV. It does not include actions performed outside this panel. An experience unban does not clear separately scoped place restrictions or device blocks; review those in Roblox.
 
+## Roblox profiles and staff chat
+
+The workspace shows ServerH's Roblox group icon, member headshots, and the signed-in operator's headshot. Public images use Roblox's [thumbnail endpoints](https://create.roblox.com/docs/cloud/reference/features/thumbnails), are cached for five minutes, and accept only HTTPS Roblox CDN URLs. Pending or unavailable images fall back to initials. Images never decide access.
+
+Staff rank tags come from the server's reviewed role policy and current membership, including Lead Operator, creator roles, and the current group owner's separate **Group owner** tag. A rank named Creator does not prove historical ownership; Roblox's current group owner is checked through the public group metadata. Unknown roles never earn a verified tag. Choose **Connection → Profile frame** for Rank frame, Crimson, Steel, Spectrum, or No frame. Frames are decorative, saved on the VPS, and apply inside this panel; they do not modify Roblox profile cosmetics or permissions.
+
+**Staff chat** provides direct conversations between verified staff who have connected to the panel at least once. An existing staff session is registered when it next makes an authenticated request. A user lookup or client-supplied rank cannot register someone. Contacts and message reads recheck current membership; sending rechecks both participants immediately before insert and checks session expiry again. Removed staff cannot continue reading or sending. Each history page contains up to 50 messages, with earlier-message pagination and ten-second polling while the conversation is visible. Contacts are capped at 200 verified profiles.
+
+Messages are plain text, limited to 2,000 characters, escaped when rendered, and rate limited to 15 send attempts per minute per operator and 300 globally. Each client message has a sender-bound nonce so retrying the same draft does not duplicate it. History endpoints only return the requesting staff member's own conversations. Messages and verified profile/frame preferences persist in the private SQLite volume. Messages are **not end-to-end encrypted**; the VPS administrator can access stored data. No email, public Roblox chat, or Roblox in-game message is sent.
+
+The ownership verification link opens the selected account's Roblox profile About section instead of account settings.
+
 ## Validation and development
 
 Node 24 or newer is required. No npm dependencies are used.
