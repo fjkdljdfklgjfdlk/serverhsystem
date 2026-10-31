@@ -1,0 +1,49 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      DATABASE_PATH: /app/data/serverh.sqlite
+      TRUST_PROXY: 1
+    volumes:
+      - panel-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+volumes:
+  panel-data:
+  caddy-data:
+  caddy-config:

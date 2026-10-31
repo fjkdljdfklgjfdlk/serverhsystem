@@ -1,0 +1,146 @@
+{
+  "715241041": {
+    "name": "Tamu",
+    "priority": 0,
+    "access": false,
+    "assignable": false
+  },
+  "12884901889": {
+    "name": "Member",
+    "priority": 1,
+    "access": false,
+    "assignable": true
+  },
+  "906198165": {
+    "name": "Testers",
+    "priority": 2,
+    "access": false,
+    "assignable": true
+  },
+  "906910111": {
+    "name": "Moderator",
+    "priority": 3,
+    "access": false,
+    "assignable": true
+  },
+  "906374081": {
+    "name": "Co-Owner ]",
+    "priority": 4,
+    "access": false,
+    "assignable": true
+  },
+  "906744116": {
+    "name": "Owner",
+    "priority": 5,
+    "access": false,
+    "assignable": true
+  },
+  "907184057": {
+    "name": "Developer-assistant",
+    "priority": 6,
+    "access": false,
+    "assignable": true
+  },
+  "907282080": {
+    "name": "Developer ]",
+    "priority": 7,
+    "access": false,
+    "assignable": true
+  },
+  "908994009": {
+    "name": "Head-Developer",
+    "priority": 8,
+    "access": false,
+    "assignable": true
+  },
+  "906640114": {
+    "name": "CoCreator",
+    "priority": 9,
+    "access": false,
+    "assignable": true
+  },
+  "906718108": {
+    "name": "Creator",
+    "priority": 10,
+    "access": false,
+    "assignable": true
+  },
+  "909060004": {
+    "name": "Co-Founder",
+    "priority": 11,
+    "access": false,
+    "assignable": true
+  },
+  "907120114": {
+    "name": "Main Co - Founder",
+    "priority": 12,
+    "access": false,
+    "assignable": true
+  },
+  "906356104": {
+    "name": "Main Founder",
+    "priority": 13,
+    "access": false,
+    "assignable": true
+  },
+  "907282079": {
+    "name": "Custom Co-Holder",
+    "priority": 14,
+    "access": false,
+    "assignable": true
+  },
+  "906250083": {
+    "name": "Custom Holder",
+    "priority": 15,
+    "access": false,
+    "assignable": true
+  },
+  "907482066": {
+    "name": "Co-Holder",
+    "priority": 19,
+    "access": false,
+    "assignable": true
+  },
+  "908682009": {
+    "name": "Holder",
+    "priority": 21,
+    "access": false,
+    "assignable": true
+  },
+  "906024064": {
+    "name": "Worker",
+    "priority": 251,
+    "access": false,
+    "assignable": true
+  },
+  "906890069": {
+    "name": "Admin",
+    "priority": 250,
+    "access": false,
+    "assignable": true
+  },
+  "906028068": {
+    "name": "Operator",
+    "priority": 252,
+    "access": false,
+    "assignable": true
+  },
+  "907620068": {
+    "name": "Lead Operator",
+    "priority": 253,
+    "access": true,
+    "assignable": false
+  },
+  "715241042": {
+    "name": "Co-Owner",
+    "priority": 254,
+    "access": true,
+    "assignable": false
+  },
+  "715241040": {
+    "name": "E",
+    "priority": 255,
+    "access": true,
+    "assignable": false
+  }
+}
