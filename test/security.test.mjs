@@ -118,3 +118,63 @@ test('Pages and VPS origins are allowlisted exactly, while lookalikes remain blo
   const r=await f.request('/health',undefined,null,{origin});assert.equal(r.status,403);assert.equal(r.headers.get('access-control-allow-origin'),null);
  }
 });
+
+test('staff can look up outside users, roleless members, and protected or unknown-role profiles',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.request('/users/lookup',{query:'50'})).status,401);
+ const {token}=await f.login();f.ranks.set('60',[]);f.ranks.set('70',['9999']);
+ const guest=await f.request('/users/lookup',{query:'50'},token);
+ assert.equal(guest.status,200);assert.equal(guest.body.user.isMember,false);assert.equal(guest.body.user.role,'Not in group');
+ assert.ok(guest.body.user.allowedActions.includes('experience-ban'));assert.ok(guest.body.user.allowedActions.includes('group-ban'));
+ assert.ok(!guest.body.user.allowedActions.includes('assign-role'));assert.ok(!guest.body.user.allowedActions.includes('kick'));
+ const roleless=await f.request('/users/lookup',{query:'60'},token);
+ assert.equal(roleless.status,200);assert.equal(roleless.body.user.isMember,true);assert.deepEqual(roleless.body.user.roles,[]);
+ assert.ok(roleless.body.user.allowedActions.includes('assign-role'));assert.ok(roleless.body.user.allowedActions.includes('kick'));
+ assert.ok(!roleless.body.user.allowedActions.includes('remove-role'));
+ for(const id of ['10','30','40','99','70']){
+  const r=await f.request('/users/lookup',{query:id},token);assert.equal(r.status,200);assert.equal(r.body.user.manageable,false);assert.deepEqual(r.body.user.allowedActions,[]);
+ }
+ assert.equal((await f.request('/actions/prepare',{...valid,targetId:'70'},token)).status,403);
+ const legacy=await f.request('/member',{userId:'50'},token);assert.equal(legacy.status,200);assert.equal(legacy.body.user.id,'50');
+});
+test('username search resolves the exact account and rejects bad queries or uncertain memberships',async t=>{
+ const f=await fixture(t),{token}=await f.login();let resolved;
+ f.rb.resolve=async(name,options)=>{resolved={name,options};return {id:50,name};};
+ const result=await f.request('/users/lookup',{query:'OutsideUser'},token);
+ assert.equal(result.status,200);assert.equal(result.body.user.id,'50');assert.deepEqual(resolved,{name:'OutsideUser',options:{excludeBannedUsers:false}});
+ for(const query of ['','@name','a display name','0','9007199254740992'])assert.equal((await f.request('/users/lookup',{query},token)).status,400);
+ const membership=f.rb.membership;
+ f.rb.membership=async id=>id==='50'?Promise.reject(new AppError(502,'Unavailable')):membership(id);
+ assert.equal((await f.request('/users/lookup',{query:'50'},token)).status,502);
+ f.rb.membership=async id=>id==='50'?{user:'users/50'}:membership(id);
+ const uncertain=await f.request('/users/lookup',{query:'50'},token);assert.equal(uncertain.status,200);assert.equal(uncertain.body.user.policyConfirmed,false);assert.deepEqual(uncertain.body.user.allowedActions,[]);
+});
+test('outside-group temporary and permanent bans and unbans retain reviews, reasons, and audit',async t=>{
+ const f=await fixture(t),{token}=await f.login();
+ assert.equal((await f.request('/actions/prepare',{...valid,targetId:'50',reason:''},token)).status,400);
+ for(const patch of [{duration:60},{duration:'permanent'},{action:'experience-unban'},{action:'group-ban'},{action:'group-unban'}]){
+  const action={...valid,targetId:'50',...patch};const plan=await f.request('/actions/prepare',action,token);assert.equal(plan.status,200,JSON.stringify(plan.body));
+  assert.equal((await f.request('/actions/confirm',{intentToken:plan.body.intentToken},token)).status,200);
+ }
+ assert.equal(f.calls.length,5);assert.equal(f.calls[0][2].gameJoinRestriction.duration,'60s');assert.equal(f.calls[1][2].gameJoinRestriction.duration,undefined);assert.equal(f.calls[2][2].gameJoinRestriction.active,false);
+ assert.deepEqual(f.calls[3],['bans/50','POST']);assert.deepEqual(f.calls[4],['bans/50','DELETE']);
+ const logs=(await f.request('/audit',undefined,token)).body.entries;assert.equal(logs.length,5);assert.ok(logs.every(row=>row.actor_id==='10'&&row.target_id==='50'&&row.status==='succeeded'));
+ for(const action of ['assign-role','remove-role','kick'])assert.equal((await f.request('/actions/prepare',{...valid,action,roleId:MEMBER,targetId:'50'},token)).status,400);
+ assert.equal(f.calls.length,5);
+});
+test('roleless members can receive a role but gain no panel access, and membership changes invalidate reviews',async t=>{
+ const f=await fixture(t),{token}=await f.login();f.ranks.set('60',[]);
+ const plan=await f.request('/actions/prepare',{action:'assign-role',targetId:'60',roleId:MEMBER,reason:valid.reason},token);assert.equal(plan.status,200);
+ assert.equal((await f.request('/actions/confirm',{intentToken:plan.body.intentToken},token)).status,200);
+ assert.match(f.calls[0][0],/memberships\/60:assignRole/);
+ const outside=await f.request('/actions/prepare',{...valid,targetId:'50'},token);assert.equal(outside.status,200);
+ f.ranks.set('50',[]);assert.equal((await f.request('/actions/confirm',{intentToken:outside.body.intentToken},token)).status,409);
+ f.ranks.set('10',[]);assert.equal((await f.request('/me',undefined,token)).status,403);
+});
+test('session is valid across page restores, expires in one hour, and browser expiry cannot extend it',async t=>{
+ const f=await fixture(t),before=Date.now(),{token}=await f.login();
+ const first=(await f.request('/me',undefined,token)).body.user.expires;
+ assert.ok(first>=before+3600000&&first<=Date.now()+3600000);
+ assert.equal((await f.request('/me',undefined,token)).body.user.expires,first);
+ f.db.exec('UPDATE sessions SET expires=0');assert.equal((await f.request('/me',undefined,token)).status,401);
+});

@@ -19,8 +19,8 @@ export class Roblox {
     return this.request(`https://apis.roblox.com/cloud/v2/${path}`, { method, headers: { 'x-api-key': this.apiKey, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
   }
   async profile(id) { return this.request(`https://users.roblox.com/v1/users/${id}`); }
-  async resolve(username) {
-    const data = await this.request('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [username], excludeBannedUsers: true }) });
+  async resolve(username, { excludeBannedUsers = true } = {}) {
+    const data = await this.request('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [username], excludeBannedUsers }) });
     ensure(data.data?.length === 1, 404, 'That Roblox username was not found.'); return data.data[0];
   }
   async membership(id) {

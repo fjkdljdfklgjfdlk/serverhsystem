@@ -77,7 +77,7 @@ After the certificate exists, install the HTTPS config as `/etc/nginx/sites-avai
 
 ## Staff access and operations
 
-Users enter a Roblox username, add the unique random phrase to their bio, save it, and verify. The backend reads that exact profile and the current membership. Sessions remain in browser memory, expire after 30 minutes, and end on reload. Challenges expire after 10 minutes, allow at most 12 checks, and can only be consumed once.
+Users enter a Roblox username, add exactly four random words to their bio, save it, and verify. Phrases contain no prefix, digits, or suffix. If Roblox filters a phrase, choose Get four new words. The backend reads that exact profile and the current membership. Sessions use per-tab browser session storage, survive refreshes in that tab, and expire one hour after sign-in. Refreshing does not extend expiry. Closing the tab clears its storage. Every restoration rechecks the session and current staff roles with the backend; stored browser values never grant access on their own. Challenges expire after 10 minutes, allow at most 12 checks, and can only be consumed once.
 
 The exact authorized role IDs are:
 
@@ -89,6 +89,8 @@ The exact authorized role IDs are:
 
 `server/role-policy.json` is the explicit application policy. Its priorities are initialized from the reviewed group snapshot, not automatically inferred from changing Roblox rank numbers or role names. Unified communities support multiple roles; all roles are checked. Unknown roles fail closed. Review the policy if roles or their intended order change.
 
+- Look up any existing Roblox user by username or ID, including non-members and members with no assigned role. Unknown roles are viewable but all actions remain blocked until owner review.
+- Ban or unban eligible users outside the group. Group membership is required only for assigning/removing roles and kicking. Empty assigned roles do not grant staff access.
 - Assign/remove individual group roles. Assigning one does not remove other roles. Protected staff roles cannot be granted or removed through the role editor.
 - Kick users from the group; this does not disconnect them from a live game.
 - Ban/unban users from the group, independently of experience restrictions.
@@ -96,7 +98,7 @@ The exact authorized role IDs are:
 - Require a 10–400 character reason for every operation, plus a 10–800 character private note for experience bans. Reasons are validated on the backend.
 - Block self-actions, bot actions, peers/higher staff, and unavailable roles. Roblox also enforces the service credential's permissions.
 
-Each mutation requires a server-issued review tied to the session and current target roles, valid for 2 minutes and usable once. Actor access is refreshed immediately before mutation. Concurrent actions against the same target are blocked. Unconfirmed requests and interrupted operations are marked `unknown` and are never automatically replayed; inspect Roblox before retrying.
+Each mutation requires a server-issued review tied to the session and current target membership and roles, valid for 2 minutes and usable once. Actor access is refreshed immediately before mutation. Concurrent actions against the same target are blocked. Unconfirmed requests and interrupted operations are marked `unknown` and are never automatically replayed; inspect Roblox before retrying.
 
 The audit log records operator, target, reason, internal details, time, and result. The UI shows the latest 100 panel operations and can export CSV. It does not include actions performed outside this panel. An experience unban does not clear separately scoped place restrictions or device blocks; review those in Roblox.
 
@@ -121,3 +123,9 @@ Infrastructure, Roblox credential validity, and read permissions were checked on
 - [Membership filters](https://create.roblox.com/docs/cloud/reference/patterns)
 - [User restrictions](https://create.roblox.com/docs/cloud/reference/features/bans-and-blocks)
 - [Experience bans](https://create.roblox.com/docs/reference/engine/classes/Players#BanAsync)
+
+## Verification word list
+
+`server/challenge-words.txt` adapts the [EFF Large Wordlist](https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt), by Joseph Bonneau / Electronic Frontier Foundation, under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Words were filtered to 3–8 letters and sensitive terms removed. The server chooses each of four words with cryptographic randomness from over 2,048 distinct words. Roblox can still filter combinations; regeneration is available. These short-lived, throttled ownership challenges are not account passwords.
+
+The private VPS Open Cloud key was created under `ServerH_SystemBOT` (`11919015367`), scoped to group read/write and restriction read/write for universe `7933292768`, with use restricted to VPS IP `187.124.131.23`. Group-cookie actions use the same bot account. Roblox attributes service actions to the credential owner; the panel audit records the staff operator separately.

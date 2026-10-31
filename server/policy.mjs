@@ -8,9 +8,9 @@ export function userId(value) {
   return s;
 }
 export function roleState(membership, policy, groupId) {
-  if (!membership) return { priority: 0, access: false, roles: [], label: 'Not a member' };
-  const paths = membership.roles ?? (membership.role ? [membership.role] : []);
-  ensure(Array.isArray(paths) && paths.length > 0, 403, 'Membership roles could not be confirmed.');
+  if (!membership) return { isMember: false, priority: 0, access: false, roles: [], label: 'Not in group' };
+  const paths = membership.roles ?? (membership.role ? [membership.role] : null);
+  ensure(Array.isArray(paths), 403, 'Membership roles could not be confirmed.');
   const roles = paths.map(path => {
     const prefix = `groups/${groupId}/roles/`;
     ensure(typeof path === 'string' && path.startsWith(prefix), 403, 'Unrecognized group role.');
@@ -19,7 +19,11 @@ export function roleState(membership, policy, groupId) {
     return { id, ...rule };
   });
   roles.sort((a, b) => b.priority - a.priority);
-  return { priority: roles[0].priority, access: roles.some(r => r.access), roles, label: roles[0].name };
+  return { isMember: true, priority: roles[0]?.priority ?? 0, access: roles.some(r => r.access), roles, label: roles[0]?.name || 'No assigned role' };
+}
+export function availableActions(actor, target, botId) {
+  if (!actor.access || target.policyConfirmed === false || target.id === String(actor.id) || target.id === String(botId) || !(target.priority < actor.priority)) return [];
+  return ['experience-ban', 'experience-unban', 'group-ban', 'group-unban', ...(target.isMember ? ['assign-role', 'kick', ...(target.roles.length ? ['remove-role'] : [])] : [])];
 }
 export function validateAction(body, actor, target, policy, botId) {
   const actions = ['assign-role', 'remove-role', 'kick', 'group-ban', 'group-unban', 'experience-ban', 'experience-unban'];
@@ -31,7 +35,7 @@ export function validateAction(body, actor, target, policy, botId) {
   const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
   ensure(reason.length >= 10 && reason.length <= 400 && /[\p{L}\p{N}]/u.test(reason), 400, 'Give a clear reason between 10 and 400 characters.');
   const result = { action: body.action, targetId, reason };
-  if (['assign-role', 'remove-role', 'kick'].includes(body.action)) ensure(target.roles.length, 400, 'This user is not in the group.');
+  if (['assign-role', 'remove-role', 'kick'].includes(body.action)) ensure(target.isMember, 400, 'This action requires a current group member. Bans and unbans can target users outside the group.');
   if (['assign-role', 'remove-role'].includes(body.action)) {
     const roleId = String(body.roleId ?? ''), rule = policy[roleId];
     ensure(rule?.assignable && !rule.access && rule.priority < actor.priority, 403, 'That role is protected or unavailable.');
