@@ -23,6 +23,42 @@ export class Roblox {
     const data = await this.request('https://users.roblox.com/v1/usernames/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usernames: [username], excludeBannedUsers }) });
     ensure(data.data?.length === 1, 404, 'That Roblox username was not found.'); return data.data[0];
   }
+  async directory() {
+    const members = new Map(), pages = new Set(); let pageToken = '';
+    do {
+      ensure(!pages.has(pageToken) && pages.size < 50, 502, 'The member directory could not be loaded completely. Use account lookup and try again later.');
+      pages.add(pageToken);
+      const query = new URLSearchParams({ maxPageSize: '100', ...(pageToken ? { pageToken } : {}) });
+      const page = await this.cloud(`groups/${this.groupId}/memberships?${query}`);
+      const rows = page.groupMemberships ?? [];
+      ensure(Array.isArray(rows) && rows.length <= 100, 502, 'Roblox returned an invalid member list.');
+      for (const membership of rows) {
+        const id = typeof membership?.user === 'string' && membership.user.match(/^users\/([1-9][0-9]{0,15})$/)?.[1];
+        ensure(id && Number.isSafeInteger(Number(id)) && (!membership.path || membership.path.startsWith(`groups/${this.groupId}/memberships/`)), 502, 'Roblox returned an unexpected group member.');
+        members.set(id, { id, membership });
+      }
+      ensure(members.size <= 5000 && (!page.nextPageToken || (typeof page.nextPageToken === 'string' && page.nextPageToken.length <= 2048 && rows.length > 0)), 502, 'Roblox returned incomplete member pagination.');
+      pageToken = page.nextPageToken || '';
+    } while (pageToken);
+    const rows = [...members.values()];
+    for (let offset = 0; offset < rows.length; offset += 100) {
+      const batch = rows.slice(offset, offset + 100), ids = new Set(batch.map(row => row.id));
+      const profiles = await this.request('https://users.roblox.com/v1/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userIds: batch.map(row => Number(row.id)), excludeBannedUsers: false }) });
+      ensure(Array.isArray(profiles.data) && profiles.data.length <= batch.length, 502, 'Roblox returned an invalid profile list.');
+      const found = new Map();
+      for (const profile of profiles.data) {
+        const id = String(profile.id);
+        ensure(ids.has(id) && !found.has(id) && typeof profile.name === 'string' && profile.name.length > 0 && profile.name.length <= 100 && typeof profile.displayName === 'string' && profile.displayName.length <= 100, 502, 'Roblox returned an unexpected member profile.');
+        found.set(id, profile);
+      }
+      for (const row of batch) {
+        const profile = found.get(row.id);
+        row.name = profile?.name || `User${row.id}`;
+        row.displayName = profile?.displayName || 'Account unavailable';
+      }
+    }
+    return rows;
+  }
   async membership(id) {
     let token = '', found = []; const pages = new Set();
     do {

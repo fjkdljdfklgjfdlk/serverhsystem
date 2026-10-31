@@ -178,3 +178,61 @@ test('session is valid across page restores, expires in one hour, and browser ex
  assert.equal((await f.request('/me',undefined,token)).body.user.expires,first);
  f.db.exec('UPDATE sessions SET expires=0');assert.equal((await f.request('/me',undefined,token)).status,401);
 });
+
+test('member directory is staff-only, searches the whole group, paginates, and projects only public fields',async t=>{
+ const f=await fixture(t);let loads=0;
+ const records=Array.from({length:45},(_,i)=>({id:String(100+i),name:'Member'+(100+i),displayName:'Display '+(100+i),membership:member(String(100+i),i===44?['9999']:[MEMBER]),privateField:'never return this'}));
+ f.rb.directory=async()=>{loads++;return records;};
+ assert.equal((await f.request('/members')).status,401);assert.equal((await f.request('/members',undefined,'x'.repeat(43))).status,401);assert.equal(loads,0);
+ const {token}=await f.login();const first=await f.request('/members',undefined,token);
+ assert.equal(first.status,200);assert.equal(first.body.totalMembers,45);assert.equal(first.body.totalPages,3);assert.equal(first.body.members.length,20);assert.equal(first.body.members[0].id,'100');
+ assert.deepEqual(Object.keys(first.body.members[0]).sort(),['displayName','id','name','role']);
+ const second=await f.request('/members?page=2',undefined,token);assert.equal(second.body.members[0].id,'120');assert.equal(loads,1);
+ const match=await f.request('/members?search=display%20131',undefined,token);assert.equal(match.body.total,1);assert.equal(match.body.members[0].id,'131');
+ const unknown=await f.request('/members?search=owner%20review',undefined,token);assert.equal(unknown.body.members[0].id,'144');
+ assert.equal((await f.request('/members?search=notfound',undefined,token)).body.total,0);
+ assert.equal((await f.request('/members?page=9999',undefined,token)).body.page,3);
+ for(const q of ['page=0','page=-1','page=1.5','search='+('a'.repeat(51)),'search=%0A'])assert.equal((await f.request('/members?'+q,undefined,token)).status,400);
+ f.ranks.set('10',[MEMBER]);assert.equal((await f.request('/members',undefined,token)).status,403);assert.equal(loads,1);
+});
+test('cached directory roles never authorize selection or actions and simultaneous reads share one load',async t=>{
+ const f=await fixture(t),{token}=await f.login();let loads=0,release;const gate=new Promise(resolve=>{release=resolve;});
+ f.rb.directory=async()=>{loads++;await gate;return [{id:'20',name:'Member20',displayName:'Member',membership:member('20',[MEMBER])}];};
+ const reads=[f.request('/members',undefined,token),f.request('/members?refresh=1',undefined,token)];
+ release();const results=await Promise.all(reads);assert.ok(results.every(r=>r.status===200));assert.equal(loads,1);
+ f.ranks.set('20',[OWNER]);assert.equal((await f.request('/members',undefined,token)).body.members[0].role,'Member');
+ const fresh=await f.request('/users/lookup',{query:'20'},token);assert.equal(fresh.body.user.manageable,false);
+ assert.equal((await f.request('/actions/prepare',valid,token)).status,403);assert.equal(f.calls.length,0);
+});
+test('directory upstream failures are recoverable and listing requests are throttled',async t=>{
+ const f=await fixture(t),{token}=await f.login();let loads=0;
+ f.rb.directory=async()=>{loads++;if(loads===1)throw new AppError(502,'Temporary directory failure');return [];};
+ assert.equal((await f.request('/members',undefined,token)).status,502);
+ const retry=await f.request('/members',undefined,token);assert.equal(retry.status,200);assert.equal(retry.body.total,0);assert.equal(retry.body.totalPages,1);
+ for(let i=0;i<28;i++)assert.equal((await f.request('/members',undefined,token)).status,200);
+ assert.equal((await f.request('/members',undefined,token)).status,429);assert.equal(loads,2);
+});
+test('Roblox directory follows membership cursors, batches profiles without credentials, and preserves multi-role data',async()=>{
+ const calls=[];
+ const rb=new Roblox({apiKey:'private-key',groupId:GROUP,fetchImpl:async(url,options)=>{
+  calls.push({url,options});
+  if(url.startsWith('https://apis.roblox.com/')){
+   const query=new URL(url).searchParams;assert.equal(query.get('maxPageSize'),'100');assert.equal(options.headers['x-api-key'],'private-key');
+   return new Response(JSON.stringify(query.get('pageToken')?{groupMemberships:[member('20',[MEMBER,TESTER]),member('30',[OWNER])]}:{groupMemberships:[member('20',[MEMBER])],nextPageToken:'next-page'}));
+  }
+  assert.equal(url,'https://users.roblox.com/v1/users');assert.equal(options.headers['x-api-key'],undefined);assert.deepEqual(JSON.parse(options.body),{userIds:[20,30],excludeBannedUsers:false});
+  return new Response(JSON.stringify({data:[{id:30,name:'Owner30',displayName:'Owner'},{id:20,name:'Member20',displayName:'Member'}]}));
+ }});
+ const result=await rb.directory();assert.equal(calls.length,3);assert.equal(result.length,2);assert.equal(result[0].name,'Member20');assert.deepEqual(result[0].membership.roles,member('20',[MEMBER,TESTER]).roles);
+});
+test('Roblox directory rejects foreign members, pagination loops, and mismatched profile IDs',async()=>{
+ for(const kind of ['foreign','loop','profile']){
+  let count=0;
+  const rb=new Roblox({apiKey:'key',groupId:GROUP,fetchImpl:async(url)=>{
+   count++;
+   if(url.startsWith('https://users.roblox.com/'))return new Response(JSON.stringify({data:[{id:999,name:'Wrong',displayName:'Wrong'}]}));
+   return new Response(JSON.stringify({groupMemberships:[{...member('20',[MEMBER]),...(kind==='foreign'?{path:'groups/999/memberships/20'}:{})}],...(kind==='loop'?{nextPageToken:'same'}:{})}));
+  }});
+  await assert.rejects(rb.directory(),error=>error.status===502);assert.ok(count<=2);
+ }
+});

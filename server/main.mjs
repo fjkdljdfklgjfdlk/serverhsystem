@@ -53,6 +53,21 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
     return { ...rank, id: session.user_id, name: session.name, expires: session.expires, key };
   }
   const publicActor = a => ({ id: a.id, name: a.name, role: a.label, expires: a.expires });
+  let directoryCache = null, directoryPending = null;
+  async function directory(refresh) {
+    const age = directoryCache ? Date.now() - directoryCache.fetchedAt : Infinity;
+    if (directoryCache && age < (refresh ? 5000 : 30000)) return directoryCache;
+    if (!directoryPending) directoryPending = (async () => {
+      const records = (await rb.directory()).map(row => {
+        let role;
+        try { role = roleState(row.membership, policy, GROUP).label; }
+        catch (error) { if (error.status !== 403) throw error; role = 'Role needs owner review'; }
+        return { id: row.id, name: row.name, displayName: row.displayName, role };
+      }).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+      directoryCache = { records, fetchedAt: Date.now() }; return directoryCache;
+    })().finally(() => { directoryPending = null; });
+    return directoryPending;
+  }
   async function body(req) {
     ensure((req.headers['content-type'] || '').split(';')[0] === 'application/json', 415, 'Use application/json.');
     let data = '', size = 0;
@@ -130,6 +145,16 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
       const actor = await auth(req);
       if (path === '/api/auth/logout' && req.method === 'POST') { sql('DELETE FROM sessions WHERE hash=?', actor.key); return json(200, { ok: true }); }
       if (path === '/api/me' && req.method === 'GET') return json(200, { user: publicActor(actor), roles: Object.entries(policy).filter(([,r]) => r.assignable && !r.access && r.priority < actor.priority).map(([id,r]) => ({ id, name: r.name })).sort((a,b) => policy[a.id].priority - policy[b.id].priority), capabilities: { groupActions: Boolean(env.ROBLOX_COOKIE), experienceBans: Boolean(env.ROBLOX_API_KEY) } });
+      if (path === '/api/members' && req.method === 'GET') {
+        rate(`directory:${actor.id}`, 30, 60);
+        const query = new URL(req.url, 'http://localhost').searchParams;
+        const rawSearch = query.get('search') || '', search = rawSearch.trim(), pageValue = query.get('page') || '1';
+        ensure(rawSearch.length <= 50 && !/[\x00-\x1f\x7f]/.test(rawSearch) && /^[1-9][0-9]{0,3}$/.test(pageValue), 400, 'Choose a valid member page or search.');
+        const result = await directory(query.get('refresh') === '1'), needle = search.normalize('NFKC').toLowerCase();
+        const matches = result.records.filter(row => !needle || [row.name, row.displayName, row.id, row.role].some(value => value.normalize('NFKC').toLowerCase().includes(needle)));
+        const pageSize = 20, totalPages = Math.max(1, Math.ceil(matches.length / pageSize)), page = Math.min(Number(pageValue), totalPages);
+        return json(200, { members: matches.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: matches.length, totalMembers: result.records.length, totalPages, fetchedAt: result.fetchedAt });
+      }
       if (['/api/users/lookup', '/api/member'].includes(path) && req.method === 'POST') {
         rate(`lookup:${actor.id}`, 30, 60);
         const input = await body(req), query = String(input.query ?? input.userId ?? '').trim();

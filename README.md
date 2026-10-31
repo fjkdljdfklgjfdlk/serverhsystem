@@ -89,6 +89,7 @@ The exact authorized role IDs are:
 
 `server/role-policy.json` is the explicit application policy. Its priorities are initialized from the reviewed group snapshot, not automatically inferred from changing Roblox rank numbers or role names. Unified communities support multiple roles; all roles are checked. Unknown roles fail closed. Review the policy if roles or their intended order change.
 
+- Browse the group member directory on People or Moderation, search across usernames, display names, IDs, and role labels, and select an account without copying its ID. The directory is paginated (20 rows), caches group data for 30 seconds, coalesces refreshes, and indexes up to 5,000 members. Selecting someone always performs a fresh profile/role lookup; cached directory rows never authorize an action.
 - Look up any existing Roblox user by username or ID, including non-members and members with no assigned role. Unknown roles are viewable but all actions remain blocked until owner review.
 - Ban or unban eligible users outside the group. Group membership is required only for assigning/removing roles and kicking. Empty assigned roles do not grant staff access.
 - Assign/remove individual group roles. Assigning one does not remove other roles. Protected staff roles cannot be granted or removed through the role editor.
