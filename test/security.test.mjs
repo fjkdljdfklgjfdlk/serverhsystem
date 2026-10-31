@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 const policy=JSON.parse(readFileSync(new URL('../server/role-policy.json',import.meta.url)));
 const LEAD='907620068', MEMBER='12884901889', OWNER='715241040', TESTER='906198165';
 const member=(id,roles)=>({user:`users/${id}`,roles:roles.map(r=>`groups/${GROUP}/roles/${r}`)});
-async function fixture(t){
+async function fixture(t, extraEnv={}){
  const ranks=new Map([['10',[LEAD]],['20',[MEMBER]],['30',[OWNER]],['40',[LEAD]]]);
  const descriptions=new Map();const calls=[];
  const rb={
@@ -17,7 +17,7 @@ async function fixture(t){
   checkBot:async()=>{},cookieAction:async(...args)=>{calls.push(args);},
   cloud:async(...args)=>{calls.push(args);if(rb.failure)throw rb.failure;return {};}
  };
- const {server,db}=makeServer({env:{PUBLIC_ORIGIN:'http://localhost:8787',BOT_USER_ID:'99',ROBLOX_API_KEY:'test-key',ROBLOX_COOKIE:'test-cookie'},databasePath:':memory:',roblox:rb});
+ const {server,db}=makeServer({env:{PUBLIC_ORIGIN:'http://localhost:8787',BOT_USER_ID:'99',ROBLOX_API_KEY:'test-key',ROBLOX_COOKIE:'test-cookie',...extraEnv},databasePath:':memory:',roblox:rb});
  ranks.set('99',[OWNER]);
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(()=>new Promise(r=>server.close(r)));
@@ -103,4 +103,18 @@ test('verification throttles repeated guesses and session expiry is enforced',as
  const c=await f.request('/auth/challenge',{username:'StaffUser'});
  for(let i=0;i<12;i++)assert.equal((await f.request('/auth/verify',{challengeToken:c.body.challengeToken})).status,403);
  assert.equal((await f.request('/auth/verify',{challengeToken:c.body.challengeToken})).status,429);
+});
+
+test('Pages and VPS origins are allowlisted exactly, while lookalikes remain blocked',async t=>{
+ const pages='https://fjkdljdfklgjfdlk.github.io',vps='https://serverh.uhbacon.cloud';
+ const f=await fixture(t,{PUBLIC_ORIGINS:pages+','+vps});
+ for(const origin of [pages,vps]){
+  const r=await f.request('/health',undefined,null,{origin});assert.equal(r.status,200);assert.equal(r.headers.get('access-control-allow-origin'),origin);
+  const response=await fetch(f.root+'/api/auth/challenge',{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'content-type,authorization'}});
+  assert.equal(response.status,204);assert.equal(response.headers.get('access-control-allow-origin'),origin);
+  assert.match(response.headers.get('access-control-allow-headers'),/Authorization/);
+ }
+ for(const origin of [pages+'.evil.example','https://attacker.github.io','null']){
+  const r=await f.request('/health',undefined,null,{origin});assert.equal(r.status,403);assert.equal(r.headers.get('access-control-allow-origin'),null);
+ }
 });

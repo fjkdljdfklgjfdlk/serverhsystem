@@ -13,10 +13,13 @@ const token = () => randomBytes(32).toString('base64url');
 const words = 'bird blue cedar stone river silver quiet green north glass maple cloud pine mist night dawn reed moon lake oak rust red pearl wave fern'.split(' ');
 const policy = JSON.parse(readFileSync(new URL('./role-policy.json', import.meta.url)));
 export function makeServer({ env = process.env, roblox: injected, databasePath } = {}) {
-  const origin = env.PUBLIC_ORIGIN || 'http://localhost:8787';
-  const parsedOrigin = new URL(origin);
-  ensure(parsedOrigin.origin === origin, 500, 'PUBLIC_ORIGIN must be an exact origin without a path or trailing slash.');
-  ensure(parsedOrigin.protocol === 'https:' || (parsedOrigin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsedOrigin.hostname)), 500, 'Use HTTPS for the public origin.');
+  const origins = (env.PUBLIC_ORIGINS || env.PUBLIC_ORIGIN || 'http://localhost:8787').split(',').map(value => value.trim());
+  for (const origin of origins) {
+    const parsedOrigin = new URL(origin);
+    ensure(parsedOrigin.origin === origin, 500, 'Each public origin must be exact, without a path or trailing slash.');
+    ensure(parsedOrigin.protocol === 'https:' || (parsedOrigin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsedOrigin.hostname)), 500, 'Use HTTPS for public origins.');
+  }
+  const allowedOrigins = new Set(origins);
   const dbPath = databasePath || env.DATABASE_PATH || resolve(ROOT, 'data/serverh.sqlite');
   if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(dbPath);
@@ -76,7 +79,7 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
     res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Frame-Options', 'DENY'); res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Vary', 'Origin');
-    if (reqOrigin === origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'); }
+    if (allowedOrigins.has(reqOrigin)) { res.setHeader('Access-Control-Allow-Origin', reqOrigin); res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization'); res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'); }
     const json = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); };
     try {
       const path = new URL(req.url, 'http://localhost').pathname;
@@ -86,7 +89,7 @@ export function makeServer({ env = process.env, roblox: injected, databasePath }
         res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
         res.writeHead(200, { 'Content-Type': file[1].startsWith('image/') ? file[1] : `${file[1]}; charset=utf-8` }); res.end(readFileSync(resolve(ROOT, 'web', file[0]))); return;
       }
-      ensure(!reqOrigin || reqOrigin === origin, 403, 'This website origin is not allowed.');
+      ensure(!reqOrigin || allowedOrigins.has(reqOrigin), 403, 'This website origin is not allowed.');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
       const address = env.TRUST_PROXY === '1' ? (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',').at(-1).trim() : req.socket.remoteAddress;
       rate(`ip:${hash(address || 'unknown')}`, 150, 60);

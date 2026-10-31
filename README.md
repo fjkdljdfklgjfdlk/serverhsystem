@@ -1,138 +1,123 @@
 # ServerH Control
 
-A red, animated staff panel for ServerH. The supplied rainbow H is used in the branding. The interface runs on GitHub Pages. A separate private Node.js backend verifies Roblox bios, authorizes staff, performs Roblox operations, and stores the audit trail.
+Animated red staff panel with the supplied rainbow H branding, Roblox bio verification, and server-side staff authorization. No preview mode or sample accounts are included.
 
-## What is included
+- **Panel on GitHub Pages:** https://fjkdljdfklgjfdlk.github.io/serverhsystem/
+- **Private API on the Hostinger VPS:** https://serverh.uhbacon.cloud
+- **Group:** `988023438` · **Universe:** `7933292768` · **Place:** `91495780481344`
 
-- Username lookup → unique bio phrase → server reads the bio → current role check.
-- Access for the exact ServerH Lead Operator, Co-Owner, and E role IDs.
-- Multiple-role support: assign and remove individual group roles using Open Cloud.
-- Group kick, group ban, group unban using a server-held bot cookie.
-- Experience bans, unbans, custom temporary durations, permanent bans, and optional suspected alternate accounts using Roblox User Restrictions.
-- Required reasons, mandatory internal notes for experience bans, server-issued action reviews, audit log and CSV export.
-- Animated page transitions, dialogs, buttons, a floating rainbow logo, responsive layouts, and reduced-motion support.
-- An always-running Docker deployment with HTTPS, persistent SQLite storage, health checks, and automatic restart after process crashes or host restarts (when Docker starts on boot).
+GitHub Pages publishes only `web/`. The VPS runs the Node backend, calls Roblox, and retains the private credentials and SQLite database. Every protected API request requires a verified session and a current authorized Roblox role. Editing the public HTML or JavaScript cannot authorize a Roblox operation.
 
-This package has not been deployed. Live Roblox mutations were not run. Tests use mocked Roblox responses. The backend requires a private Open Cloud key, a protected bot ID, and hosting configuration before real staff can connect. The supplied chat cookie is not saved in these files.
+## GitHub Pages
 
-## 1. Run locally
+In repository **Settings → Pages → Build and deployment**, select **GitHub Actions**. The `Deploy panel interface` workflow publishes `web/` when those files or the workflow change on `main`, and supports manual dispatch. It does not upload `.env`, backend files, or databases.
 
-Install Node.js 24 or newer. No npm dependencies are required.
+`web/config.js` points to `https://serverh.uhbacon.cloud`. Asset paths are relative so the panel works at the repository Pages path. The backend's exact origin allowlist contains:
 
-```sh
-npm start
+```dotenv
+PUBLIC_ORIGINS=https://fjkdljdfklgjfdlk.github.io,https://serverh.uhbacon.cloud
 ```
 
-Open `http://localhost:8787` to sign in. The dashboard opens only after the backend verifies your Roblox bio and confirms an authorized group role. There is no preview or demo mode, including on localhost. Without backend credentials, sign-in returns a setup message.
+Only the matching requesting origin is echoed in CORS headers. Similar domains, other GitHub Pages accounts, and null origins are rejected. Origin checks supplement session and rank authorization; they do not replace authentication. Keep other content hosted under the same GitHub Pages account trusted, because GitHub project paths share one browser origin.
 
-Opening `web/index.html` directly shows the login screen only. Sign-in requires HTTP/HTTPS and the configured backend. Sessions stay in browser memory and end on reload; verify again to reconnect. Active sessions expire after 30 minutes.
+## Current VPS deployment
 
-## 2. Configure the private backend
+The installation is at `/opt/serverh-control`, behind the existing host Nginx service. Use **`compose.vps.yaml`** on this VPS. It publishes the container port only on `127.0.0.1:8787`; Nginx handles ports 80/443. The alternative `compose.yaml`/`Caddyfile` are for a separate server without an existing web proxy and are not used by this installation.
 
-Copy `.env.example` to `.env` on the backend machine. Fill in these values using your host's private environment settings or the private local file:
+The VPS has:
 
-| Setting | Value |
+- A Node 24 container, restart policy `unless-stopped`, process health checks, and a persistent SQLite volume.
+- An HTTPS certificate for `serverh.uhbacon.cloud` with Certbot renewal and an Nginx reload hook.
+- The bot cookie and Open Cloud key in the private `.env`, mode `600`, outside Git.
+- Bot account `ServerH_SystemBOT`, ID `11919015367`, protected from panel actions.
+
+The bot was verified to hold **Operator** and the site owner's account to hold **Lead Operator**. The cookie can therefore manage only users below Operator, subject to the bot's Roblox group permissions. Role assignment and experience moderation use the Open Cloud key and its permissions. Roblox can revoke or expire either credential; automatic restart cannot repair revoked access or a Roblox outage.
+
+### Start or update the backend
+
+Keep the private `.env` and Docker volume in place. After fetching the intended release, use:
+
+```sh
+git fetch origin main
+git switch --detach origin/main
+docker compose -p serverh-control -f compose.vps.yaml up -d --build
+docker compose -p serverh-control -f compose.vps.yaml ps
+```
+
+Review the incoming source before running it. Do not delete the Docker volume during an update. Run one API instance against the SQLite database. Use SQLite's backup facilities or stop the API before copying its database file. Docker must start on boot for automatic startup.
+
+`https://serverh.uhbacon.cloud/api/health` reports process availability and whether key/ID settings exist. `configured: true` does not guarantee that credentials remain valid. A Docker health check marks an unresponsive container unhealthy; the restart policy restarts exited containers, not merely unhealthy ones.
+
+### Private environment
+
+Use `.env.example` only as a template. Never replace a populated VPS `.env` with the blank template. The runtime needs:
+
+| Setting | Purpose |
 | --- | --- |
-| `PUBLIC_ORIGIN` | Your exact Pages origin, such as `https://YOURNAME.github.io`. No repository path and no trailing slash. |
-| `ROBLOX_API_KEY` | Private Roblox Open Cloud API key, scoped to group `988023438` and universe `7933292768`. |
-| `BOT_USER_ID` | The numeric Roblox ID of the account whose cookie you use; panel actions against it are blocked. |
-| `ROBLOX_COOKIE` | Only the `.ROBLOSECURITY` cookie value, entered privately on the backend. Required for group kick/ban/unban. No cookie is needed for bio verification, role updates, or experience bans. |
-| `DATABASE_PATH` | SQLite file on persistent storage. Docker sets this automatically. |
-| `API_DOMAIN` | Your API hostname, such as `control-api.example.com`, for the included Docker/Caddy deployment. |
+| `ROBLOX_API_KEY` | Open Cloud key with group read/write and ServerH user-restriction read/write. |
+| `ROBLOX_COOKIE` | Bot `.ROBLOSECURITY` value, used for group kick/ban/unban. |
+| `BOT_USER_ID` | Protected account ID, verified against the cookie before cookie actions. |
+| `PUBLIC_ORIGINS` | Comma-separated exact browser origins allowed to call the API. |
+| `DATABASE_PATH` | Persistent SQLite file; Compose sets `/app/data/serverh.sqlite`. |
+| `TRUST_PROXY` | Enabled by Compose only behind the trusted proxy that overwrites `X-Forwarded-For`. |
 
-Create a key in [Creator Hub credentials](https://create.roblox.com/dashboard/credentials). The key creator must have the corresponding community and experience permissions. Restrict the key to these resources and, when possible, your server's fixed outbound IP. Enable these permissions:
+The existing single-origin `PUBLIC_ORIGIN` remains supported when `PUBLIC_ORIGINS` is absent or empty. Production origins must use HTTPS; localhost HTTP is permitted for development. No cookie or API key belongs in `web/config.js`, GitHub Pages, repository files, or browser storage.
 
-- Group membership/role read and write (`group:read`, `group:write`). The key creator must be able to read the group's memberships and manage the intended roles.
-- Universe user-restriction read and write (`universe.user-restriction:read`, `universe.user-restriction:write`) for universe `7933292768`.
+The Open Cloud key should be restricted to the VPS outbound IP `187.124.131.23`, with `group:read`, `group:write`, and `universe.user-restriction:read`/`write` for ServerH universe `7933292768`. The key creator must hold the corresponding Roblox permissions. Enable experience bans (`Players.BanningEnabled`) in Studio. The bot never joins a game client to issue an experience ban.
 
-Enable experience bans in Studio (`Players.BanningEnabled`) and confirm moderation permissions in Creator Hub. A bot never joins a game to perform an experience ban: the backend uses Roblox's own moderation API. Universe-wide bans appear in the linked Creator Hub experience. Temporary bans expire through Roblox.
+### Nginx and certificates
 
-Give the bot the group permissions required to remove and ban members and place it above the roles it manages. The backend confirms that the cookie account matches `BOT_USER_ID` before cookie actions. Roblox may require additional challenges for a cookie, revoke it, or limit access from hosting IPs. This app reports those errors; it does not bypass challenges. Renew a cookie privately in the host settings and restart the backend if needed.
-
-Never paste credentials into `web/config.js`, HTML, browser storage, GitHub Actions public output, or a repository. `.env` and databases are ignored by Git and Docker build contexts. The Pages workflow uploads only `web/`.
-
-## 3. Keep the service running
-
-Use an always-on Linux machine with Docker Compose, an API domain pointing to its public IP, and ports 80 and 443 open. Configure Docker to start on boot. Set the private `.env` values above, then run:
+`deploy/serverh-control.nginx.conf` matches the domain's HTTPS reverse-proxy configuration. It requires an existing certificate before `nginx -t` can pass. For a fresh installation, first add an HTTP-only ACME webroot server, then issue the certificate:
 
 ```sh
-docker compose up -d --build
-docker compose ps
-docker compose logs --tail=50 api
+certbot certonly --webroot -w /var/www/serverh-acme -d serverh.uhbacon.cloud --non-interactive
 ```
 
-Caddy obtains HTTPS certificates automatically. The API has no public direct port; the proxy forwards to it. `TRUST_PROXY=1` is safe here because the included proxy overwrites `X-Forwarded-For`. Do not expose the API directly with that setting. For a different host, leave it disabled unless the host's trusted proxy is configured to overwrite that header.
+After the certificate exists, install the HTTPS config as `/etc/nginx/sites-available/serverh-control.conf`, enable its symlink, run `nginx -t`, and reload Nginx. Do not overwrite other sites. Install `deploy/renew-serverh-nginx.sh` as `/etc/letsencrypt/renewal-hooks/deploy/serverh-nginx-reload` with mode `700`. The existing `certbot.timer` handles renewals.
 
-The API health endpoint is `https://YOUR_API_DOMAIN/api/health`. It reports whether the process is running and whether key/ID settings exist; it does not claim that credentials remain valid. Authorized staff can check Connection and view action errors. Use a host uptime monitor if you need outage notifications. Docker's health check marks an unresponsive container unhealthy; restart policy restarts exited containers, not merely unhealthy ones.
+## Staff access and operations
 
-Run **one API instance** against the SQLite volume. The in-process workflow and startup recovery assume a single writer process. On restart, unfinished actions are marked `unknown` and are not replayed. Check Roblox before trying them again. Keep the volume backed up using SQLite's backup facilities or by stopping the API before copying the database. Do not delete the volume when updating.
+Users enter a Roblox username, add the unique random phrase to their bio, save it, and verify. The backend reads that exact profile and the current membership. Sessions remain in browser memory, expire after 30 minutes, and end on reload. Challenges expire after 10 minutes, allow at most 12 checks, and can only be consumed once.
 
-No service can guarantee uninterrupted availability or permanent cookie validity. Hosting must stay powered on and connected; automatic restart cannot repair revoked credentials or a Roblox outage. Roblox does not require the bot to remain logged into a game client for these API operations.
+The exact authorized role IDs are:
 
-For updates:
+| Role | Role ID |
+| --- | --- |
+| Lead Operator | `907620068` |
+| Co-Owner | `715241042` |
+| E | `715241040` |
 
-```sh
-docker compose up -d --build
-```
+`server/role-policy.json` is the explicit application policy. Its priorities are initialized from the reviewed group snapshot, not automatically inferred from changing Roblox rank numbers or role names. Unified communities support multiple roles; all roles are checked. Unknown roles fail closed. Review the policy if roles or their intended order change.
 
-For local live setup, keep `PUBLIC_ORIGIN=http://localhost:8787` and run `npm start`. On a non-Docker host terminate HTTPS at a trusted proxy, set `HOST` to suit the host, and configure a process supervisor with restart on crash and startup at boot.
+- Assign/remove individual group roles. Assigning one does not remove other roles. Protected staff roles cannot be granted or removed through the role editor.
+- Kick users from the group; this does not disconnect them from a live game.
+- Ban/unban users from the group, independently of experience restrictions.
+- Apply temporary experience bans (1 minute–365 days), permanent bans, and universe-level unbans. Suspected alternate accounts are excluded unless selected. Permanent Open Cloud bans omit `duration`.
+- Require a 10–400 character reason for every operation, plus a 10–800 character private note for experience bans. Reasons are validated on the backend.
+- Block self-actions, bot actions, peers/higher staff, and unavailable roles. Roblox also enforces the service credential's permissions.
 
-## 4. Publish the interface to GitHub Pages
+Each mutation requires a server-issued review tied to the session and current target roles, valid for 2 minutes and usable once. Actor access is refreshed immediately before mutation. Concurrent actions against the same target are blocked. Unconfirmed requests and interrupted operations are marked `unknown` and are never automatically replayed; inspect Roblox before retrying.
 
-1. In `web/config.js`, set `apiBase` to the backend HTTPS origin, such as `https://control-api.example.com`. This is a public URL, never a secret.
-2. Upload this project to a GitHub repository, preserving `.github/workflows/pages.yml`. Do not upload a filled `.env` file or databases.
-3. Set repository **Settings → Pages → Build and deployment → Source → GitHub Actions**.
-4. Push to `main` or run **Deploy panel interface** in Actions. The workflow publishes only `web/`.
-5. Open the resulting Pages URL. Enter your real username, add the generated phrase to your Roblox About / bio, save, and verify.
+The audit log records operator, target, reason, internal details, time, and result. The UI shows the latest 100 panel operations and can export CSV. It does not include actions performed outside this panel. An experience unban does not clear separately scoped place restrictions or device blocks; review those in Roblox.
 
-Your API's `PUBLIC_ORIGIN` must match the Pages browser origin exactly. For a custom domain, use that custom origin. A GitHub project site under `/repo-name/` still has origin `https://YOURNAME.github.io`. Relative asset paths work in project sites. Use a dedicated origin if other untrusted projects share your GitHub Pages domain.
+## Validation and development
 
-## Access policy
-
-`server/role-policy.json` contains the reviewed application policy, captured from the group's public roles on October 31, 2026:
-
-| Exact role ID | Display name | Panel access |
-| --- | --- | --- |
-| `907620068` | Lead Operator | Yes |
-| `715241042` | Co-Owner | Yes |
-| `715241040` | E | Yes |
-
-Higher roles still cannot grant any of these protected staff roles through this panel. This intentional safeguard prevents panel-based privilege escalation. Staff can manage only lower-priority targets and explicitly assignable roles. Self-actions, bot actions, and actions against peers or higher staff are rejected on the backend. Roblox also applies its own credential permissions.
-
-`priority` values are this application's explicit policy; they are initialized from the public role snapshot. Roblox's unified communities can have multiple roles and role order can differ from the legacy numeric rank field. The application does **not** automatically promote access based on live rank numbers or role names. Review the policy if roles/order change. New unknown role IDs fail closed for both actors and targets, including accounts that also hold a known role. The decorative separator role is not manageable.
-
-Authorization reads fresh Open Cloud memberships on every authenticated request and again immediately before a mutation. Roblox's own data propagation delay still applies. Access decisions are not based on hidden HTML, JavaScript flags, client-provided ranks, or local storage. Removing staff access from Roblox blocks subsequent API requests when Roblox reflects the change.
-
-Bio verification is a custom ownership proof, not Roblox OAuth or a Roblox-operated login. Challenges have a random 128-bit suffix, expire after 10 minutes, are checked at most 12 times, and can only be consumed once. Never ask another user to put your verification phrase in their bio. OAuth is preferable if you later need stronger standardized identity or longer sessions.
-
-## Action behavior
-
-- **Assign role:** adds one role. It does not remove existing roles. To change a member's role, assign the new role, then separately remove the old role if appropriate. Both actions receive their own review and audit entry.
-- **Kick:** removes group membership; it does not kick from a live game server.
-- **Group ban / unban:** controls access to the group. A group unban does not automatically rejoin the person.
-- **Experience ban:** applies to the whole universe, with a player-facing reason, private staff note, and 1 minute–365 day duration or permanent. Suspected alts are excluded unless selected. Permanent Open Cloud bans omit `duration`; they do not send the Engine API's `-1` value.
-- **Experience unban:** clears a universe-level restriction. Separately scoped place restrictions and device blocks may need further handling in Roblox.
-- Every action needs a 10–400 character reason. Experience bans also require a 10–800 character private note. Validation happens on both client and server.
-- A server-issued review is bound to the session and current target roles, expires after 2 minutes, and can be submitted only once. Concurrent actions for the same target are blocked. Network errors are not automatically retried.
-- Audit records contain the operator, target ID, reason, internal details, timestamp, and success/failure/unknown status. Authorized staff can view these records. The UI shows the most recent 100; the database retains all records. This audit log covers this panel's operations, not actions performed elsewhere in Roblox.
-
-## Validation
+Node 24 or newer is required. No npm dependencies are used.
 
 ```sh
 npm run check
 npm test
 ```
 
-Tests cover unverified access, forged tokens, rank revocation, missing reasons, invalid durations, protected targets/roles, multiple roles, unknown roles, one-time reviews, concurrent confirmation, uncertain outcomes, expiry, rate limits, pagination, and CSRF-token handling. They never send live Roblox mutations.
+The tests cover unauthorized access, forged tokens, role revocation, missing reasons, invalid durations, protected targets and roles, multiple roles, unknown roles, challenge/session expiry, throttling, one-time reviews, concurrency, uncertain outcomes, pagination, CSRF handling, and exact CORS allowlisting for Pages and the VPS.
 
-Before enabling real use, verify with an authorized low-privilege test account that each intended action works under your actual key and bot permissions. Live Roblox behavior and hosting availability cannot be confirmed without those credentials and deployment.
+For local development, use `PUBLIC_ORIGIN=http://localhost:8787` with `PUBLIC_ORIGINS` unset, and set `web/config.js` `apiBase` to an empty string to target the local backend. `npm start` opens the HTTP service; opening the HTML file directly cannot authenticate. There is no demo bypass.
 
-## Roblox API references
+Infrastructure, Roblox credential validity, and read permissions were checked on the VPS. No real user was ranked, kicked, or banned during setup. Perform intended mutations only after reviewing an authorized target in the panel.
 
-- [Group APIs and role assignment](https://create.roblox.com/docs/cloud/reference/features/groups)
-- [Membership filter syntax](https://create.roblox.com/docs/cloud/reference/patterns)
-- [User Restrictions / moderation](https://create.roblox.com/docs/cloud/reference/features/bans-and-blocks)
-- [Roblox ban system](https://create.roblox.com/docs/reference/engine/classes/Players#BanAsync)
-- [Unified community role changes](https://devforum.roblox.com/t/official-list-of-deprecated-web-endpoints/62889/123)
+## Roblox references
 
-The provided place `91495780481344` was verified through Roblox's universe lookup as belonging to universe `7933292768`. No real users were ranked, removed, or banned while creating this package.
+- [Group APIs](https://create.roblox.com/docs/cloud/reference/features/groups)
+- [Membership filters](https://create.roblox.com/docs/cloud/reference/patterns)
+- [User restrictions](https://create.roblox.com/docs/cloud/reference/features/bans-and-blocks)
+- [Experience bans](https://create.roblox.com/docs/reference/engine/classes/Players#BanAsync)
